@@ -1,0 +1,1577 @@
+diff --git a/.env.example b/.env.example
+index 88a4944..499d976 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,5 +1,12 @@
+-# Sao chép file này thành .env (cùng thư mục) rồi chỉnh nếu cần. Không commit file .env.
+-SECRET_KEY=doi-chuoi-bi-mat-nay
++# Sao chép file này thành .env (cùng thư mục) rồi chỉnh nếu cần. KHÔNG commit file .env.
++
++# development (mặc định) hoặc production. Ở production, cấu hình yếu sẽ bị từ chối khởi động.
++APP_ENV=development
++
++# BẮT BUỘC ở production, tối thiểu 32 ký tự. Tạo khóa:
++#   python -c "import secrets; print(secrets.token_hex(32))"
++# Ở development nếu để trống, hệ thống tự sinh khóa ngẫu nhiên lưu ở backend/database/.dev_secret_key
++SECRET_KEY=
+ JWT_EXPIRES_HOURS=24
+ 
+ # Mặc định dùng SQLite tại backend/database/cinevo.db. Muốn chuyển PostgreSQL thì mở dòng dưới
+@@ -7,8 +14,16 @@ JWT_EXPIRES_HOURS=24
+ # DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/cinevo
+ 
+ CORS_ORIGINS=http://localhost:5173
++
++# Chỉ lắng nghe localhost. Debug sẽ TỰ TẮT nếu HOST khác localhost hoặc APP_ENV=production.
++HOST=127.0.0.1
+ PORT=5000
++FLASK_DEBUG=true
+ 
+-# OTP giả lập (chưa gửi email thật). Đặt OTP_DEBUG_HINT=false khi triển khai thật.
++# OTP (chỉ có tác dụng ở development): mã cố định + hiện gợi ý trên giao diện.
++# Ở production luôn dùng mã ngẫu nhiên, không trả mã ra API.
+ MOCK_OTP_CODE=123456
+ OTP_DEBUG_HINT=true
++
++# Giới hạn số lần thử đăng nhập/OTP/đăng ký. Chỉ tắt khi chạy test.
++RATELIMIT_ENABLED=true
+diff --git a/.gitignore b/.gitignore
+index 10e9eb3..a0e8b6e 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -14,3 +14,6 @@ dist/
+ .vscode/
+ .idea/
+ .DS_Store
++
++# Khóa bí mật sinh tự động khi phát triển
++.dev_secret_key
+diff --git a/README.md b/README.md
+index ad282d5..fa420cd 100644
+--- a/README.md
++++ b/README.md
+@@ -8,6 +8,7 @@ Giai đoạn này chỉ dựng khung: thanh toán là **giả lập**, AI trả
+ - Node.js 18 trở lên
+ 
+ ## 2. Chạy backend (Flask)
++(Tùy chọn) tạo file cấu hình: sao chép `.env.example` thành `.env`. Có thể bỏ qua khi phát triển, hệ thống tự dùng giá trị an toàn.
+ Mở terminal (PowerShell) tại thư mục dự án:
+ 
+ ```powershell
+@@ -19,7 +20,7 @@ python run.py
+ ```
+ 
+ - Lần chạy đầu tiên, `run.py` tự tạo file `backend/database/cinevo.db` cùng toàn bộ bảng và dữ liệu demo.
+-- Backend chạy tại http://localhost:5000 (kiểm tra: http://localhost:5000/api/health).
++- Backend chỉ lắng nghe `127.0.0.1:5000` (kiểm tra: http://localhost:5000/api/health). Muốn mở cho mạng LAN phải đặt `HOST` trong `.env`, khi đó chế độ debug tự tắt.
+ - Nếu PowerShell chặn `activate`, chạy một lần: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+ - Muốn tạo lại database từ đầu (ví dụ ngày suất chiếu demo đã cũ): `python database/seed.py --reset`.
+ 
+@@ -124,5 +125,30 @@ Mỗi chỗ cần gọi AI thật đều có comment `TODO (AI thật)`.
+ Dùng SQLAlchemy nên không cần sửa model. Cài `pip install psycopg2-binary`, rồi đặt `DATABASE_URL` trong `.env`
+ (ví dụ `postgresql+psycopg2://user:pass@localhost:5432/cinevo`).
+ 
+-## 10. Việc tiếp theo (chưa làm ở giai đoạn khung)
++## 10. Bảo mật và cấu hình môi trường
++| Hạng mục | Cách xử lý |
++|---|---|
++| `SECRET_KEY` | Production **bắt buộc** khóa ≥ 32 ký tự, thiếu/yếu là không khởi động. Development tự sinh khóa ngẫu nhiên (file `backend/database/.dev_secret_key`, đã ignore) |
++| Debug | Chỉ bật ở development **và** khi `HOST` là localhost |
++| OTP | Development: mã cố định `123456` + gợi ý trên giao diện. Production: mã ngẫu nhiên, không trả ra API (chưa có gửi email thật) |
++| Giới hạn lần thử | Đăng nhập 10 lần/5 phút (theo IP + email); OTP 5 lần/10 phút/email; đăng ký 10 lần/giờ/IP. Trả `429` + `Retry-After` |
++| Dữ liệu vào | Giới hạn độ dài, kiểm tra kiểu và giá trị; JSON hỏng trả `400`; body tối đa 1 MB |
++| Giờ | Mốc hệ thống lưu UTC; giờ chiếu là giờ Việt Nam (UTC+7), xem `app/timeutil.py` |
++| Header | `nosniff`, `X-Frame-Options`, `Referrer-Policy`; HSTS ở production |
++
++Còn tồn đọng (ghi nhận, xử lý ở phase sau): token JWT lưu `localStorage` và chưa thu hồi được phía server; bộ đếm giới hạn lần thử là in-memory (cần Redis khi chạy nhiều worker); `npm audit` báo `vite` và `react-router-dom` có bản vá ở phiên bản major mới, chưa nâng cấp; chưa có migration (Alembic).
++
++## 11. Kiểm thử
++```powershell
++cd backend
++pip install -r requirements-dev.txt
++python -m pytest
++```
++Bộ test (`backend/tests/`) gồm tài khoản, chống nâng quyền, ma trận phân quyền, token giả, tranh chấp ghế (12 request đồng thời), giá do server tính, validate, rate limit, cấu hình production.
++
++## 12. Git và điểm khôi phục
++Dự án đã có Git. Tag `phase0-baseline` là bản trước khi gia cố. Quay lại: `git checkout phase0-baseline`.
++Trước mỗi thay đổi lớn hãy `git commit` và đặt tag mới.
++
++## 13. Việc tiếp theo (chưa làm)
+ Thanh toán thật, gửi OTP qua email, gọi AI/LLM thật, kết nối API phim thật, form Thêm/Sửa/Xóa trong trang manager/admin, hủy vé, khuyến mãi khi thanh toán.
+diff --git a/backend/app/__init__.py b/backend/app/__init__.py
+index 4e4a7bd..62bee58 100644
+--- a/backend/app/__init__.py
++++ b/backend/app/__init__.py
+@@ -4,6 +4,7 @@ from flask_cors import CORS
+ 
+ from .config import Config
+ from .extensions import db
++from .services.validation import ApiError
+ 
+ 
+ def create_app(config_class=Config):
+@@ -22,10 +23,31 @@ def create_app(config_class=Config):
+     def health():
+         return jsonify({"status": "ok", "app": "CINEVO"})
+ 
++    @app.after_request
++    def security_headers(resp):
++        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
++        resp.headers.setdefault("X-Frame-Options", "DENY")
++        resp.headers.setdefault("Referrer-Policy", "no-referrer")
++        if app.config["IS_PRODUCTION"]:
++            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
++        return resp
++
++    @app.errorhandler(ApiError)
++    def api_error(e):
++        return jsonify({"message": e.message, "code": e.code}), e.status
++
+     @app.errorhandler(404)
+     def not_found(_e):
+         return jsonify({"message": "Không tìm thấy tài nguyên."}), 404
+ 
++    @app.errorhandler(405)
++    def not_allowed(_e):
++        return jsonify({"message": "Phương thức không được hỗ trợ."}), 405
++
++    @app.errorhandler(413)
++    def too_large(_e):
++        return jsonify({"message": "Dữ liệu gửi lên quá lớn."}), 413
++
+     @app.errorhandler(500)
+     def server_error(_e):
+         return jsonify({"message": "Lỗi hệ thống, vui lòng thử lại."}), 500
+diff --git a/backend/app/config.py b/backend/app/config.py
+index 1d7c9c3..96e4d17 100644
+--- a/backend/app/config.py
++++ b/backend/app/config.py
+@@ -1,5 +1,11 @@
+-"""Cấu hình ứng dụng. Giá trị đọc từ file .env (xem .env.example ở thư mục gốc)."""
++"""Cấu hình ứng dụng. Giá trị đọc từ file .env (xem .env.example ở thư mục gốc).
++
++APP_ENV=development (mặc định) hoặc production. Ở production, cấu hình không an toàn
++(SECRET_KEY yếu, OTP cố định, debug...) sẽ bị TỪ CHỐI khởi động thay vì chạy âm thầm.
++"""
++import logging
+ import os
++import secrets
+ from pathlib import Path
+ 
+ from dotenv import load_dotenv
+@@ -8,10 +14,55 @@ BASE_DIR = Path(__file__).resolve().parent.parent          # .../Cinevo/backend
+ load_dotenv(BASE_DIR.parent / ".env")
+ load_dotenv(BASE_DIR / ".env")
+ 
++APP_ENV = os.getenv("APP_ENV", "development").lower()
++IS_PRODUCTION = APP_ENV == "production"
++INSECURE_SECRETS = {"", "dev-secret-change-me", "doi-chuoi-bi-mat-nay", "changeme", "secret"}
++DEV_SECRET_FILE = BASE_DIR / "database" / ".dev_secret_key"
++
++
++def resolve_secret_key(value: str | None, is_production: bool, dev_file: Path = DEV_SECRET_FILE) -> str:
++    """Trả về SECRET_KEY an toàn.
++
++    - Có khóa mạnh trong .env: dùng khóa đó.
++    - Production mà thiếu/yếu: báo lỗi, không khởi động.
++    - Development mà thiếu: tự sinh khóa ngẫu nhiên và lưu file riêng (không dùng chuỗi mặc định đoán được).
++    """
++    value = (value or "").strip()
++    strong = value not in INSECURE_SECRETS and len(value) >= 32
++    if strong:
++        return value
++    if is_production:
++        raise RuntimeError("SECRET_KEY chưa đặt hoặc quá yếu. Tạo khóa: "
++                           "python -c \"import secrets; print(secrets.token_hex(32))\"")
++    if value not in INSECURE_SECRETS:   # dev: chấp nhận khóa ngắn do người dùng tự đặt
++        return value
++    if dev_file.exists():
++        return dev_file.read_text().strip()
++    key = secrets.token_hex(32)
++    dev_file.write_text(key)
++    logging.getLogger(__name__).warning("Đã sinh SECRET_KEY phát triển tại %s", dev_file)
++    return key
++
++
++def get_run_settings(env=None) -> tuple[str, int, bool]:
++    """(host, port, debug) cho run.py. Debug chỉ bật ở development VÀ khi chỉ lắng nghe localhost,
++    vì trình gỡ lỗi Werkzeug cho phép chạy code tùy ý nếu bị truy cập từ mạng."""
++    env = os.environ if env is None else env
++    host = env.get("HOST", "127.0.0.1")
++    port = int(env.get("PORT", "5000"))
++    debug = (not IS_PRODUCTION) and env.get("FLASK_DEBUG", "true").lower() == "true"
++    if debug and host not in ("127.0.0.1", "localhost", "::1"):
++        logging.getLogger(__name__).warning("Tắt debug vì HOST=%s không phải localhost.", host)
++        debug = False
++    return host, port, debug
++
+ 
+ class Config:
+-    SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
++    APP_ENV = APP_ENV
++    IS_PRODUCTION = IS_PRODUCTION
++    SECRET_KEY = resolve_secret_key(os.getenv("SECRET_KEY"), IS_PRODUCTION)
+     JWT_EXPIRES_HOURS = int(os.getenv("JWT_EXPIRES_HOURS", "24"))
++    MAX_CONTENT_LENGTH = 1024 * 1024        # 1 MB: chặn request quá lớn
+ 
+     # SQLite mặc định. Sau này chỉ cần đổi DATABASE_URL sang PostgreSQL, ví dụ:
+     # postgresql+psycopg2://user:pass@localhost:5432/cinevo
+@@ -22,6 +73,8 @@ class Config:
+ 
+     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+ 
+-    # OTP giả lập: giai đoạn khung chưa gửi email thật.
+-    MOCK_OTP_CODE = os.getenv("MOCK_OTP_CODE", "123456")
+-    OTP_DEBUG_HINT = os.getenv("OTP_DEBUG_HINT", "true").lower() == "true"
++    # OTP: development dùng mã cố định cho dễ thử. Production luôn sinh mã ngẫu nhiên và KHÔNG trả mã ra API.
++    MOCK_OTP_CODE = "" if IS_PRODUCTION else os.getenv("MOCK_OTP_CODE", "123456")
++    OTP_DEBUG_HINT = (not IS_PRODUCTION) and os.getenv("OTP_DEBUG_HINT", "true").lower() == "true"
++
++    RATELIMIT_ENABLED = os.getenv("RATELIMIT_ENABLED", "true").lower() == "true"
+diff --git a/backend/app/models/activity_log.py b/backend/app/models/activity_log.py
+index 8d95284..1b4876b 100644
+--- a/backend/app/models/activity_log.py
++++ b/backend/app/models/activity_log.py
+@@ -1,7 +1,6 @@
+ """Model ActivityLog (nhật ký hoạt động cho trang Admin)."""
+-from datetime import datetime
+-
+ from ..extensions import db
++from ..timeutil import iso_utc, utc_now
+ 
+ 
+ class ActivityLog(db.Model):
+@@ -11,14 +10,14 @@ class ActivityLog(db.Model):
+     user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+     action = db.Column(db.String(60), nullable=False)
+     detail = db.Column(db.String(250))
+-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
++    created_at = db.Column(db.DateTime, default=utc_now)
+ 
+     user = db.relationship("User")
+ 
+     def to_dict(self):
+         return {"id": self.id, "user": self.user.email if self.user else "-",
+                 "action": self.action, "detail": self.detail,
+-                "created_at": self.created_at.isoformat()}
++                "created_at": iso_utc(self.created_at)}
+ 
+ 
+ def log_activity(user_id, action, detail=""):
+diff --git a/backend/app/models/booking.py b/backend/app/models/booking.py
+index ed32c08..bd5c4ed 100644
+--- a/backend/app/models/booking.py
++++ b/backend/app/models/booking.py
+@@ -1,7 +1,6 @@
+ """Model Booking, BookingSeat, BookingFood."""
+-from datetime import datetime
+-
+ from ..extensions import db
++from ..timeutil import iso_utc, local_now, utc_now
+ 
+ 
+ class Booking(db.Model):
+@@ -15,7 +14,7 @@ class Booking(db.Model):
+     food_amount = db.Column(db.Integer, default=0)
+     total_amount = db.Column(db.Integer, default=0)
+     status = db.Column(db.String(20), default="PAID")                 # PENDING | PAID | CANCELLED
+-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
++    created_at = db.Column(db.DateTime, default=utc_now)
+ 
+     user = db.relationship("User")
+     showtime = db.relationship("Showtime")
+@@ -32,7 +31,7 @@ class Booking(db.Model):
+                       "poster_color": st.movie.poster_color, "poster_url": st.movie.poster_url},
+             "cinema": st.room.cinema.name, "city": st.room.cinema.city,
+             "room": st.room.name, "start_time": st.start_time.isoformat(),
+-            "is_upcoming": st.start_time >= datetime.now(),
++            "is_upcoming": st.start_time >= local_now(),
+             "seats": seat_labels,
+             "foods": [{"name": bf.food.name, "quantity": bf.quantity, "unit_price": bf.unit_price}
+                       for bf in self.foods],
+@@ -40,7 +39,7 @@ class Booking(db.Model):
+             "total_amount": self.total_amount,
+             "payment": self.payment.to_dict() if self.payment else None,
+             "user": {"id": self.user.id, "full_name": self.user.full_name, "email": self.user.email},
+-            "created_at": self.created_at.isoformat(),
++            "created_at": iso_utc(self.created_at),
+             "qr_payload": f"CINEVO|{self.code}|{st.id}|{','.join(seat_labels)}",
+         }
+ 
+diff --git a/backend/app/models/payment.py b/backend/app/models/payment.py
+index 30f898c..6a696ed 100644
+--- a/backend/app/models/payment.py
++++ b/backend/app/models/payment.py
+@@ -1,7 +1,6 @@
+ """Model Payment (giai đoạn khung: thanh toán giả lập)."""
+-from datetime import datetime
+-
+ from ..extensions import db
++from ..timeutil import iso_utc, utc_now
+ 
+ PAYMENT_METHODS = ("QR", "EWALLET", "BANK")
+ 
+@@ -15,7 +14,7 @@ class Payment(db.Model):
+     amount = db.Column(db.Integer, nullable=False)
+     status = db.Column(db.String(20), default="PAID")
+     transaction_ref = db.Column(db.String(60))
+-    paid_at = db.Column(db.DateTime, default=datetime.utcnow)
++    paid_at = db.Column(db.DateTime, default=utc_now)
+ 
+     booking = db.relationship("Booking", back_populates="payment")
+ 
+@@ -24,4 +23,4 @@ class Payment(db.Model):
+                 "booking_code": self.booking.code if self.booking else None,
+                 "method": self.method, "amount": self.amount, "status": self.status,
+                 "transaction_ref": self.transaction_ref,
+-                "paid_at": self.paid_at.isoformat() if self.paid_at else None}
++                "paid_at": iso_utc(self.paid_at)}
+diff --git a/backend/app/models/user.py b/backend/app/models/user.py
+index 77916fd..2096903 100644
+--- a/backend/app/models/user.py
++++ b/backend/app/models/user.py
+@@ -1,9 +1,8 @@
+ """Model User + OtpCode."""
+-from datetime import datetime
+-
+ from werkzeug.security import check_password_hash, generate_password_hash
+ 
+ from ..extensions import db
++from ..timeutil import iso_utc, utc_now
+ 
+ STATUS_PENDING = "PENDING"   # đã đăng ký, chưa xác thực OTP
+ STATUS_ACTIVE = "ACTIVE"
+@@ -20,7 +19,7 @@ class User(db.Model):
+     password_hash = db.Column(db.String(255), nullable=False)
+     role_id = db.Column(db.Integer, db.ForeignKey("roles.id"), nullable=False)
+     status = db.Column(db.String(20), default=STATUS_PENDING, nullable=False)
+-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
++    created_at = db.Column(db.DateTime, default=utc_now)
+ 
+     role = db.relationship("Role")
+ 
+@@ -38,7 +37,7 @@ class User(db.Model):
+             "phone": self.phone,
+             "role": self.role.name if self.role else None,
+             "status": self.status,
+-            "created_at": self.created_at.isoformat() if self.created_at else None,
++            "created_at": iso_utc(self.created_at),
+         }
+ 
+ 
+diff --git a/backend/app/routes/admin.py b/backend/app/routes/admin.py
+index c15825c..e4d3bea 100644
+--- a/backend/app/routes/admin.py
++++ b/backend/app/routes/admin.py
+@@ -6,6 +6,7 @@ from ..extensions import db
+ from ..models import (ActivityLog, Booking, Movie, Payment, Promotion, ROLE_ADMIN, ROLE_MANAGER,
+                       Role, STATUS_ACTIVE, STATUS_LOCKED, User, log_activity)
+ from ..services.auth_service import roles_required
++from ..services.validation import EMAIL_RE, PHONE_RE, ApiError, clean_str, json_body
+ from flask import g
+ 
+ bp = Blueprint("admin", __name__, url_prefix="/api/admin")
+@@ -38,9 +39,9 @@ def users():
+ @admin_only
+ def set_status(user_id):
+     user = db.session.get(User, user_id)
+-    status = (request.get_json(silent=True) or {}).get("status")
++    status = json_body().get("status")
+     if not user or status not in (STATUS_ACTIVE, STATUS_LOCKED):
+-        return jsonify({"message": "Dữ liệu không hợp lệ."}), 400
++        raise ApiError("Dữ liệu không hợp lệ.")
+     if user.id == g.current_user.id:
+         return jsonify({"message": "Không thể tự khóa tài khoản của mình."}), 400
+     user.status = status
+@@ -59,11 +60,16 @@ def managers():
+ @admin_only
+ def create_manager():
+     """Chỉ ADMIN mới tạo được MANAGER (đây là cách DUY NHẤT để có tài khoản MANAGER)."""
+-    d = request.get_json(silent=True) or {}
+-    email = (d.get("email") or "").strip().lower()
+-    if not email or len(d.get("password") or "") < 6 or User.query.filter_by(email=email).first():
+-        return jsonify({"message": "Email trống, đã tồn tại hoặc mật khẩu quá ngắn."}), 400
+-    user = User(full_name=d.get("full_name") or email, email=email, phone=d.get("phone"),
++    d = json_body()
++    email = clean_str(d.get("email"), "email", max_len=160, required=True).lower()
++    password, phone = d.get("password"), clean_str(d.get("phone"), "số điện thoại", max_len=15)
++    if not EMAIL_RE.match(email) or (phone and not PHONE_RE.match(phone)):
++        raise ApiError("Email hoặc số điện thoại không hợp lệ.")
++    if not isinstance(password, str) or not (6 <= len(password) <= 128):
++        raise ApiError("Mật khẩu cần từ 6 đến 128 ký tự.")
++    if User.query.filter_by(email=email).first():
++        raise ApiError("Email đã tồn tại.", 409)
++    user = User(full_name=clean_str(d.get("full_name"), "họ tên", max_len=120) or email, email=email, phone=phone or None,
+                 role=Role.query.filter_by(name=ROLE_MANAGER).one(), status=STATUS_ACTIVE)
+     user.set_password(d["password"])
+     db.session.add(user)
+diff --git a/backend/app/routes/ai.py b/backend/app/routes/ai.py
+index 313477b..6c3c788 100644
+--- a/backend/app/routes/ai.py
++++ b/backend/app/routes/ai.py
+@@ -7,28 +7,30 @@ from ..ai.seat_recommendation import SeatRecommendationService
+ from ..extensions import db
+ from ..models import Seat, Showtime
+ from ..services.booking_service import taken_seat_ids
++from ..services.validation import ApiError, clean_str, int_arg, json_body
+ 
+ bp = Blueprint("ai", __name__, url_prefix="/api/ai")
+ 
+ 
+ @bp.get("/recommend-movies")
+ def recommend_movies():
+-    return jsonify(MovieRecommendationService().recommend(request.args.get("genre"),
+-                                                          int(request.args.get("limit", 5))))
++    return jsonify(MovieRecommendationService().recommend(request.args.get("genre", "")[:50] or None,
++                                                          int_arg("limit", 5, lo=1, hi=20)))
+ 
+ 
+ @bp.get("/recommend-seats")
+ def recommend_seats():
+-    st = db.session.get(Showtime, int(request.args.get("showtime_id", 0)))
++    st = db.session.get(Showtime, int_arg("showtime_id", 0))
+     if not st:
+         return jsonify({"message": "Không tìm thấy suất chiếu."}), 404
+     taken = taken_seat_ids(st.id)
+     seats = [{"id": s.id, "row": s.row_label, "number": s.number, "label": s.label, "booked": s.id in taken}
+              for s in Seat.query.filter_by(room_id=st.room_id).all()]
+-    return jsonify(SeatRecommendationService().recommend(seats, int(request.args.get("count", 2))))
++    return jsonify(SeatRecommendationService().recommend(seats, int_arg("count", 2, lo=1, hi=4)))
+ 
+ 
+ @bp.post("/chat")
+ def chat():
+-    data = request.get_json(silent=True) or {}
+-    return jsonify(ChatbotService().reply(data.get("message", ""), data.get("history")))
++    data = json_body()
++    message = clean_str(data.get("message"), "Tin nhắn", required=True, max_len=500)
++    return jsonify(ChatbotService().reply(message))
+diff --git a/backend/app/routes/auth.py b/backend/app/routes/auth.py
+index b5c10d4..5f97c29 100644
+--- a/backend/app/routes/auth.py
++++ b/backend/app/routes/auth.py
+@@ -1,68 +1,64 @@
+ """Đăng ký / OTP / đăng nhập. Role khi tự đăng ký luôn là USER."""
+-import re
+-
+-from flask import Blueprint, g, jsonify, request
++from flask import Blueprint, current_app, g, jsonify
+ 
+ from ..extensions import db
+ from ..models import ROLE_USER, Role, STATUS_ACTIVE, STATUS_PENDING, User, log_activity
+ from ..services.auth_service import (auth_required, create_token, issue_otp, mask_email, verify_otp)
+-from flask import current_app
++from ..services.rate_limit import email_key, ip_and_email_key, rate_limit
++from ..services.validation import (EMAIL_RE, PHONE_RE, ApiError, clean_str, json_body)
+ 
+ bp = Blueprint("auth", __name__, url_prefix="/api/auth")
+-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+-PHONE_RE = re.compile(r"^(0|\+84)\d{9,10}$")
+ 
+ 
+-def _err(message, status=400, code=None):
+-    return jsonify({"message": message, "code": code}), status
++def _otp_hint_body(code):
++    return {"otp_hint": code} if current_app.config["OTP_DEBUG_HINT"] else {}
+ 
+ 
+ @bp.post("/register")
++@rate_limit("register", 10, 3600)
+ def register():
+-    data = request.get_json(silent=True) or {}
+-    # LƯU Ý BẢO MẬT: cố tình KHÔNG đọc data["role"]. Client không thể tự chọn MANAGER/ADMIN.
+-    full_name = (data.get("full_name") or "").strip()
+-    email = (data.get("email") or "").strip().lower()
+-    phone = (data.get("phone") or "").strip()
+-    password = data.get("password") or ""
+-
+-    if len(full_name) < 2:
+-        return _err("Vui lòng nhập họ và tên.")
++    data = json_body()
++    # LƯU Ý BẢO MẬT: cố tình KHÔNG đọc role/role_id/status từ client. Client không thể tự chọn MANAGER/ADMIN.
++    full_name = clean_str(data.get("full_name"), "họ và tên", min_len=2, max_len=120, required=True)
++    email = clean_str(data.get("email"), "email", max_len=160, required=True).lower()
++    phone = clean_str(data.get("phone"), "số điện thoại", max_len=15, required=True)
++    password = data.get("password")
++    if not isinstance(password, str) or not (6 <= len(password) <= 128):
++        raise ApiError("Mật khẩu cần từ 6 đến 128 ký tự.")
+     if not EMAIL_RE.match(email):
+-        return _err("Email không hợp lệ.")
++        raise ApiError("Email không hợp lệ.")
+     if not PHONE_RE.match(phone):
+-        return _err("Số điện thoại không hợp lệ.")
+-    if len(password) < 6:
+-        return _err("Mật khẩu cần ít nhất 6 ký tự.")
++        raise ApiError("Số điện thoại không hợp lệ.")
+     if password != data.get("confirm_password"):
+-        return _err("Mật khẩu nhập lại không khớp.")
+-    if not data.get("accept_terms"):
+-        return _err("Bạn cần đồng ý với điều khoản sử dụng.")
++        raise ApiError("Mật khẩu nhập lại không khớp.")
++    if data.get("accept_terms") is not True:
++        raise ApiError("Bạn cần đồng ý với điều khoản sử dụng.")
+ 
+     user = User.query.filter_by(email=email).first()
+     if user and user.status != STATUS_PENDING:
+-        return _err("Email này đã được sử dụng.", 409, "EMAIL_EXISTS")
++        raise ApiError("Email này đã được sử dụng.", 409, "EMAIL_EXISTS")
+     if not user:   # tài khoản PENDING cũ được phép đăng ký lại (cập nhật thông tin)
+         user = User(email=email, role=Role.query.filter_by(name=ROLE_USER).one())
+         db.session.add(user)
+     user.full_name, user.phone, user.status = full_name, phone, STATUS_PENDING
+     user.set_password(password)
+     db.session.flush()
+-    hint = issue_otp(user)
++    code = issue_otp(user)
+     db.session.commit()
+ 
+-    body = {"message": "Đã gửi mã xác thực.", "email": email, "masked_email": mask_email(email)}
+-    if current_app.config["OTP_DEBUG_HINT"]:
+-        body["otp_hint"] = hint    # chỉ để demo. Production phải bỏ.
+-    return jsonify(body), 201
++    return jsonify({"message": "Đã gửi mã xác thực.", "email": email,
++                    "masked_email": mask_email(email), **_otp_hint_body(code)}), 201
+ 
+ 
+ @bp.post("/verify-otp")
++@rate_limit("otp-email", 5, 600, key=email_key)     # tối đa 5 lần thử / 10 phút / email
++@rate_limit("otp-ip", 30, 600)
+ def verify():
+-    data = request.get_json(silent=True) or {}
+-    user = User.query.filter_by(email=(data.get("email") or "").strip().lower()).first()
+-    if not user or not verify_otp(user, str(data.get("code") or "")):
+-        return _err("Mã xác thực không đúng hoặc đã hết hạn.", 400, "OTP_INVALID")
++    data = json_body()
++    user = User.query.filter_by(email=clean_str(data.get("email"), "email", max_len=160).lower()).first()
++    code = data.get("code")
++    if not user or not isinstance(code, str) or not verify_otp(user, code):
++        raise ApiError("Mã xác thực không đúng hoặc đã hết hạn.", 400, "OTP_INVALID")
+     user.status = STATUS_ACTIVE
+     log_activity(user.id, "REGISTER_VERIFIED", user.email)
+     db.session.commit()
+@@ -70,9 +66,10 @@ def verify():
+ 
+ 
+ @bp.post("/resend-otp")
++@rate_limit("otp-resend", 3, 600, key=email_key)
+ def resend():
+-    data = request.get_json(silent=True) or {}
+-    user = User.query.filter_by(email=(data.get("email") or "").strip().lower(),
++    data = json_body()
++    user = User.query.filter_by(email=clean_str(data.get("email"), "email", max_len=160).lower(),
+                                 status=STATUS_PENDING).first()
+     if user:
+         issue_otp(user)
+@@ -81,18 +78,22 @@ def resend():
+ 
+ 
+ @bp.post("/login")
++@rate_limit("login", 10, 300, key=ip_and_email_key)   # tối đa 10 lần / 5 phút cho mỗi cặp IP + email
++@rate_limit("login-ip", 60, 300)
+ def login():
+-    data = request.get_json(silent=True) or {}
+-    email = (data.get("email") or "").strip().lower()
++    data = json_body()
++    email = clean_str(data.get("email"), "email", max_len=160).lower()
++    password = data.get("password")
+     user = User.query.filter_by(email=email).first()
+-    if not user or not user.check_password(data.get("password") or ""):
+-        return _err("Email hoặc mật khẩu không đúng.", 401, "BAD_CREDENTIALS")
++    if not user or not isinstance(password, str) or not user.check_password(password):
++        raise ApiError("Email hoặc mật khẩu không đúng.", 401, "BAD_CREDENTIALS")
+     if user.status == STATUS_PENDING:
+-        issue_otp(user)
++        code = issue_otp(user)
+         db.session.commit()
+-        return _err("Tài khoản chưa xác thực. Vui lòng nhập mã OTP.", 403, "NOT_VERIFIED")
++        return jsonify({"message": "Tài khoản chưa xác thực. Vui lòng nhập mã OTP.", "code": "NOT_VERIFIED",
++                        **_otp_hint_body(code)}), 403
+     if user.status != STATUS_ACTIVE:
+-        return _err("Tài khoản đã bị khóa.", 403, "LOCKED")
++        raise ApiError("Tài khoản đã bị khóa.", 403, "LOCKED")
+     log_activity(user.id, "LOGIN", user.email)
+     db.session.commit()
+     return jsonify({"token": create_token(user), "user": user.to_dict()})
+@@ -107,11 +108,14 @@ def me():
+ @bp.put("/me")
+ @auth_required
+ def update_me():
+-    data = request.get_json(silent=True) or {}
++    data = json_body()
+     user = g.current_user
+-    if "full_name" in data and len(data["full_name"].strip()) >= 2:
+-        user.full_name = data["full_name"].strip()
+-    if "phone" in data and PHONE_RE.match(data["phone"].strip()):
+-        user.phone = data["phone"].strip()
++    if "full_name" in data:
++        user.full_name = clean_str(data["full_name"], "họ và tên", min_len=2, max_len=120, required=True)
++    if "phone" in data:
++        phone = clean_str(data["phone"], "số điện thoại", max_len=15, required=True)
++        if not PHONE_RE.match(phone):
++            raise ApiError("Số điện thoại không hợp lệ.")
++        user.phone = phone
+     db.session.commit()
+     return jsonify({"user": user.to_dict()})
+diff --git a/backend/app/routes/bookings.py b/backend/app/routes/bookings.py
+index f489ac8..3b59090 100644
+--- a/backend/app/routes/bookings.py
++++ b/backend/app/routes/bookings.py
+@@ -1,9 +1,10 @@
+ """API combo đồ ăn và đặt vé. Đặt vé / xem vé yêu cầu đăng nhập."""
+-from flask import Blueprint, g, jsonify, request
++from flask import Blueprint, g, jsonify
+ 
+ from ..models import Booking, Food
+ from ..services.auth_service import auth_required
+ from ..services.booking_service import BookingError, create_booking
++from ..services.validation import ApiError, clean_int, clean_str, json_body
+ 
+ bp = Blueprint("bookings", __name__, url_prefix="/api")
+ 
+@@ -16,10 +17,15 @@ def foods():
+ @bp.post("/bookings")
+ @auth_required
+ def make_booking():
+-    data = request.get_json(silent=True) or {}
++    data = json_body()
++    seat_ids, foods = data.get("seat_ids") or [], data.get("foods") or []
++    if not isinstance(seat_ids, list) or not isinstance(foods, list) or len(foods) > 20:
++        raise ApiError("Dữ liệu đặt vé không hợp lệ.")
++    showtime_id = clean_int(data.get("showtime_id"), "Suất chiếu", lo=1)
++    seat_ids = [clean_int(s, "Ghế", lo=1) for s in seat_ids]
+     try:
+-        booking = create_booking(g.current_user, data.get("showtime_id"), data.get("seat_ids") or [],
+-                                 data.get("foods") or [], data.get("payment_method"))
++        booking = create_booking(g.current_user, showtime_id, seat_ids, foods,
++                                 clean_str(data.get("payment_method"), "phương thức thanh toán", max_len=20))
+     except BookingError as e:
+         return jsonify({"message": e.message, "code": e.code}), e.status
+     return jsonify(booking.to_dict()), 201
+@@ -36,7 +42,7 @@ def my_bookings():
+ @bp.get("/bookings/<code>")
+ @auth_required
+ def booking_detail(code):
+-    booking = Booking.query.filter_by(code=code).first()
++    booking = Booking.query.filter_by(code=code[:20]).first()
+     is_staff = g.current_user.role.name in ("MANAGER", "ADMIN")
+     if not booking or (booking.user_id != g.current_user.id and not is_staff):
+         return jsonify({"message": "Không tìm thấy vé."}), 404
+diff --git a/backend/app/routes/manager.py b/backend/app/routes/manager.py
+index 0800e29..79461b6 100644
+--- a/backend/app/routes/manager.py
++++ b/backend/app/routes/manager.py
+@@ -7,7 +7,9 @@ from sqlalchemy import func
+ from ..extensions import db
+ from ..models import (Booking, Cinema, Food, Movie, Room, Seat, Showtime, ROLE_ADMIN, ROLE_MANAGER)
+ from ..services.auth_service import roles_required
++from ..services.validation import clean_int, clean_str, ApiError, json_body, int_arg
+ 
++MOVIE_STATUSES = ("now_showing", "coming_soon")
+ bp = Blueprint("manager", __name__, url_prefix="/api/manager")
+ staff = roles_required(ROLE_MANAGER, ROLE_ADMIN)
+ 
+@@ -35,11 +37,14 @@ def movies():
+ @staff
+ def create_movie():
+     """Mẫu thêm phim. TODO: validate đầy đủ ở giai đoạn nghiệp vụ."""
+-    d = request.get_json(silent=True) or {}
+-    if not d.get("title"):
+-        return jsonify({"message": "Thiếu tên phim."}), 400
+-    movie = Movie(title=d["title"], genre=d.get("genre"), duration_minutes=d.get("duration_minutes", 120),
+-                  description=d.get("description"), status=d.get("status", "coming_soon"))
++    d = json_body()
++    status = d.get("status", "coming_soon")
++    if status not in MOVIE_STATUSES:
++        raise ApiError("Trạng thái phim không hợp lệ.")
++    movie = Movie(title=clean_str(d.get("title"), "tên phim", max_len=200, required=True),
++                  genre=clean_str(d.get("genre"), "thể loại", max_len=120) or None,
++                  duration_minutes=clean_int(d.get("duration_minutes", 120), "thời lượng", lo=1, hi=600),
++                  description=clean_str(d.get("description"), "mô tả", max_len=5000) or None, status=status)
+     db.session.add(movie)
+     db.session.commit()
+     return jsonify(movie.to_dict()), 201
+@@ -61,8 +66,8 @@ def rooms():
+ @staff
+ def seats():
+     q = Seat.query
+-    if rid := request.args.get("room_id"):
+-        q = q.filter_by(room_id=int(rid))
++    if (rid := int_arg("room_id")) is not None:
++        q = q.filter_by(room_id=rid)
+     return jsonify([s.to_dict() for s in q.limit(200).all()])
+ 
+ 
+diff --git a/backend/app/routes/movies.py b/backend/app/routes/movies.py
+index 16f325c..1ae9bff 100644
+--- a/backend/app/routes/movies.py
++++ b/backend/app/routes/movies.py
+@@ -1,10 +1,9 @@
+ """API phim (công khai, không cần đăng nhập)."""
+-from datetime import datetime
+-
+ from flask import Blueprint, jsonify, request
+ 
+ from ..extensions import db
+ from ..models import Cinema, Movie, Room, Showtime
++from ..timeutil import local_now
+ 
+ bp = Blueprint("movies", __name__, url_prefix="/api/movies")
+ 
+@@ -21,7 +20,7 @@ def list_movies():
+         query = query.filter(Movie.title.ilike(f"%{q}%"))
+     if city := request.args.get("city"):   # chỉ giữ phim có suất chiếu sắp tới tại khu vực
+         ids = (db.session.query(Showtime.movie_id).join(Room).join(Cinema)
+-               .filter(Cinema.city == city, Showtime.start_time >= datetime.now()))
++               .filter(Cinema.city == city, Showtime.start_time >= local_now()))
+         query = query.filter(Movie.status == "coming_soon") if request.args.get("status") == "coming_soon" \
+             else query.filter(Movie.id.in_(ids))
+     return jsonify([m.to_dict() for m in query.order_by(Movie.rating.desc()).all()])
+diff --git a/backend/app/routes/showtimes.py b/backend/app/routes/showtimes.py
+index c9e39eb..9d3e14d 100644
+--- a/backend/app/routes/showtimes.py
++++ b/backend/app/routes/showtimes.py
+@@ -6,6 +6,8 @@ from flask import Blueprint, jsonify, request
+ from ..extensions import db
+ from ..models import Cinema, Room, Seat, Showtime
+ from ..services.booking_service import taken_seat_ids
++from ..services.validation import int_arg
++from ..timeutil import local_now
+ 
+ bp = Blueprint("showtimes", __name__, url_prefix="/api/showtimes")
+ 
+@@ -13,11 +15,11 @@ bp = Blueprint("showtimes", __name__, url_prefix="/api/showtimes")
+ @bp.get("")
+ def list_showtimes():
+     """?movie_id= &cinema_id= &city= &date=YYYY-MM-DD (chỉ trả suất chưa bắt đầu)."""
+-    query = Showtime.query.join(Room).join(Cinema).filter(Showtime.start_time >= datetime.now())
+-    if v := request.args.get("movie_id"):
+-        query = query.filter(Showtime.movie_id == int(v))
+-    if v := request.args.get("cinema_id"):
+-        query = query.filter(Cinema.id == int(v))
++    query = Showtime.query.join(Room).join(Cinema).filter(Showtime.start_time >= local_now())
++    if (v := int_arg("movie_id")) is not None:
++        query = query.filter(Showtime.movie_id == v)
++    if (v := int_arg("cinema_id")) is not None:
++        query = query.filter(Cinema.id == v)
+     if v := request.args.get("city"):
+         query = query.filter(Cinema.city == v)
+     if v := request.args.get("date"):
+diff --git a/backend/app/services/auth_service.py b/backend/app/services/auth_service.py
+index 8074ac7..dbe7325 100644
+--- a/backend/app/services/auth_service.py
++++ b/backend/app/services/auth_service.py
+@@ -1,5 +1,6 @@
+ """Tạo/kiểm tra JWT, decorator phân quyền, và logic OTP giả lập."""
+-from datetime import datetime, timedelta
++import secrets
++from datetime import datetime, timedelta, timezone
+ from functools import wraps
+ 
+ import jwt
+@@ -7,13 +8,15 @@ from flask import current_app, g, jsonify, request
+ 
+ from ..extensions import db
+ from ..models import OtpCode, User, STATUS_ACTIVE
++from ..timeutil import utc_now
++from .email_service import deliver_otp
+ 
+ 
+ def create_token(user: User) -> str:
+     payload = {
+         "sub": str(user.id),
+         "role": user.role.name,
+-        "exp": datetime.utcnow() + timedelta(hours=current_app.config["JWT_EXPIRES_HOURS"]),
++        "exp": datetime.now(timezone.utc) + timedelta(hours=current_app.config["JWT_EXPIRES_HOURS"]),
+     }
+     return jwt.encode(payload, current_app.config["SECRET_KEY"], algorithm="HS256")
+ 
+@@ -57,16 +60,18 @@ def roles_required(*roles):
+ 
+ # ---------- OTP giả lập ----------
+ def issue_otp(user: User) -> str:
+-    code = current_app.config["MOCK_OTP_CODE"]   # TODO: sinh mã ngẫu nhiên + gửi email thật
+-    db.session.add(OtpCode(user_id=user.id, code=code,
+-                           expires_at=datetime.utcnow() + timedelta(minutes=10)))
++    """Tạo OTP mới (vô hiệu các mã cũ). Dev: mã cố định nếu cấu hình; còn lại là mã ngẫu nhiên."""
++    code = current_app.config["MOCK_OTP_CODE"] or f"{secrets.randbelow(10**6):06d}"
++    OtpCode.query.filter_by(user_id=user.id, used=False).update({"used": True})
++    db.session.add(OtpCode(user_id=user.id, code=code, expires_at=utc_now() + timedelta(minutes=10)))
++    deliver_otp(user.email, code)
+     return code
+ 
+ 
+ def verify_otp(user: User, code: str) -> bool:
+     otp = (OtpCode.query.filter_by(user_id=user.id, code=code, used=False)
+            .order_by(OtpCode.id.desc()).first())
+-    if not otp or otp.expires_at < datetime.utcnow():
++    if not otp or otp.expires_at < utc_now():
+         return False
+     otp.used = True
+     return True
+diff --git a/backend/app/services/booking_service.py b/backend/app/services/booking_service.py
+index 24be5b5..55afa97 100644
+--- a/backend/app/services/booking_service.py
++++ b/backend/app/services/booking_service.py
+@@ -1,9 +1,8 @@
+ """Logic tạo Booking. Giá luôn được TÍNH LẠI ở server, không tin giá từ client."""
+-from datetime import datetime
+-
+ from sqlalchemy.exc import IntegrityError
+ 
+ from ..extensions import db
++from ..timeutil import local_now
+ from ..models import (Booking, BookingFood, BookingSeat, Food, Payment, PAYMENT_METHODS,
+                       Seat, Showtime, log_activity)
+ 
+@@ -23,7 +22,7 @@ def create_booking(user, showtime_id, seat_ids, foods, method) -> Booking:
+     showtime = db.session.get(Showtime, showtime_id)
+     if not showtime:
+         raise BookingError("Suất chiếu không tồn tại.", 404)
+-    if showtime.start_time < datetime.now():
++    if showtime.start_time < local_now():
+         raise BookingError("Suất chiếu đã bắt đầu.")
+     if method not in PAYMENT_METHODS:
+         raise BookingError("Phương thức thanh toán không hợp lệ.")
+@@ -49,8 +48,13 @@ def create_booking(user, showtime_id, seat_ids, foods, method) -> Booking:
+ 
+     food_total = 0
+     for item in foods or []:
+-        food = db.session.get(Food, item.get("food_id"))
+-        qty = int(item.get("quantity", 0))
++        if not isinstance(item, dict):
++            raise BookingError("Combo đồ ăn không hợp lệ.")
++        try:
++            food_id, qty = int(item.get("food_id")), int(item.get("quantity", 0))
++        except (TypeError, ValueError):
++            raise BookingError("Combo đồ ăn không hợp lệ.")
++        food = db.session.get(Food, food_id)
+         if not food or not food.available or not (0 < qty <= 20):
+             raise BookingError("Combo đồ ăn không hợp lệ.")
+         food_total += food.price * qty
+@@ -59,7 +63,7 @@ def create_booking(user, showtime_id, seat_ids, foods, method) -> Booking:
+ 
+     booking.seat_amount, booking.food_amount = seat_total, food_total
+     booking.total_amount = seat_total + food_total
+-    booking.code = f"CV{datetime.now():%m%y}{booking.id:04d}"       # ví dụ CV10260001
++    booking.code = f"CV{local_now():%m%y}{booking.id:04d}"       # ví dụ CV10260001
+ 
+     # TODO: tích hợp cổng thanh toán thật. Hiện tại luôn coi là thanh toán thành công.
+     db.session.add(Payment(booking_id=booking.id, method=method, amount=booking.total_amount,
+diff --git a/backend/app/services/email_service.py b/backend/app/services/email_service.py
+new file mode 100644
+index 0000000..bd7124a
+--- /dev/null
++++ b/backend/app/services/email_service.py
+@@ -0,0 +1,14 @@
++"""Gửi OTP. GIAI ĐOẠN KHUNG: chưa có nhà cung cấp email, chỉ ghi log ở development."""
++import logging
++
++from flask import current_app
++
++log = logging.getLogger(__name__)
++
++
++def deliver_otp(email: str, code: str) -> None:
++    if current_app.config["IS_PRODUCTION"]:
++        # TODO (Phase tích hợp email): gọi SMTP/SendGrid/SES. KHÔNG ghi mã OTP vào log ở production.
++        log.warning("Chưa cấu hình gửi email OTP cho %s.", email)
++    else:
++        log.info("[DEV] Mã OTP của %s là %s", email, code)
+diff --git a/backend/app/services/rate_limit.py b/backend/app/services/rate_limit.py
+new file mode 100644
+index 0000000..387fee5
+--- /dev/null
++++ b/backend/app/services/rate_limit.py
+@@ -0,0 +1,59 @@
++"""Giới hạn số lần gọi (in-memory, đủ cho 1 tiến trình).
++
++GHI CHÚ TRIỂN KHAI: khi chạy nhiều worker/server (Phase 15) cần chuyển bộ đếm sang Redis
++(ví dụ Flask-Limiter). Sau reverse proxy, phải cấu hình để request.remote_addr là IP thật của khách.
++"""
++import threading
++import time
++from collections import defaultdict, deque
++from functools import wraps
++
++from flask import current_app, jsonify, request
++
++_hits: dict[str, deque] = defaultdict(deque)
++_lock = threading.Lock()
++
++
++def reset():
++    with _lock:
++        _hits.clear()
++
++
++def _client_ip():
++    return request.remote_addr or "unknown"
++
++
++def rate_limit(name, limit, window_seconds, key=None):
++    """key(): hàm trả chuỗi định danh thêm (vd email). Mặc định chỉ theo IP."""
++    def decorator(fn):
++        @wraps(fn)
++        def wrapper(*args, **kwargs):
++            if not current_app.config.get("RATELIMIT_ENABLED", True):
++                return fn(*args, **kwargs)
++            ident = key() if key else _client_ip()
++            bucket, now = f"{name}:{ident}", time.monotonic()
++            with _lock:
++                hits = _hits[bucket]
++                while hits and now - hits[0] > window_seconds:
++                    hits.popleft()
++                if len(hits) >= limit:
++                    retry = int(window_seconds - (now - hits[0])) + 1
++                    resp = jsonify({"message": f"Thao tác quá nhiều lần. Vui lòng thử lại sau {retry} giây.",
++                                    "code": "RATE_LIMITED"})
++                    resp.status_code = 429
++                    resp.headers["Retry-After"] = str(retry)
++                    return resp
++                hits.append(now)
++            return fn(*args, **kwargs)
++        return wrapper
++    return decorator
++
++
++def email_key():
++    data = request.get_json(silent=True)
++    email = data.get("email") if isinstance(data, dict) else ""
++    return str(email or "").strip().lower()[:160]
++
++
++def ip_and_email_key():
++    return f"{_client_ip()}|{email_key()}"
+diff --git a/backend/app/services/validation.py b/backend/app/services/validation.py
+new file mode 100644
+index 0000000..ee817e8
+--- /dev/null
++++ b/backend/app/services/validation.py
+@@ -0,0 +1,60 @@
++"""Validate đầu vào dùng chung + lỗi API thống nhất."""
++import re
++
++from flask import request
++
++EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
++PHONE_RE = re.compile(r"^(0|\+84)\d{9,10}$")
++
++
++class ApiError(Exception):
++    def __init__(self, message, status=400, code=None):
++        super().__init__(message)
++        self.message, self.status, self.code = message, status, code
++
++
++def json_body() -> dict:
++    """Đọc JSON object. Body rỗng -> {}. JSON hỏng hoặc không phải object -> 400."""
++    if not request.get_data():
++        return {}
++    data = request.get_json(silent=True)
++    if not isinstance(data, dict):
++        raise ApiError("Dữ liệu gửi lên không hợp lệ.", 400, "BAD_JSON")
++    return data
++
++
++def clean_str(value, label, *, min_len=0, max_len=200, required=False) -> str:
++    if value is None or value == "":
++        if required:
++            raise ApiError(f"Vui lòng nhập {label}.")
++        return ""
++    if not isinstance(value, str):
++        raise ApiError(f"{label} không hợp lệ.")
++    value = value.strip()
++    if required and not value:
++        raise ApiError(f"Vui lòng nhập {label}.")
++    if len(value) < min_len:
++        raise ApiError(f"{label} quá ngắn (tối thiểu {min_len} ký tự).")
++    if len(value) > max_len:
++        raise ApiError(f"{label} quá dài (tối đa {max_len} ký tự).")
++    return value
++
++
++def clean_int(value, label, *, lo=None, hi=None) -> int:
++    if isinstance(value, bool):
++        raise ApiError(f"{label} không hợp lệ.")
++    try:
++        number = int(value)
++    except (TypeError, ValueError):
++        raise ApiError(f"{label} không hợp lệ.")
++    if (lo is not None and number < lo) or (hi is not None and number > hi):
++        raise ApiError(f"{label} nằm ngoài khoảng cho phép.")
++    return number
++
++
++def int_arg(name, default=None, *, lo=None, hi=None):
++    """Đọc tham số query kiểu số nguyên; sai định dạng -> 400 thay vì lỗi 500."""
++    raw = request.args.get(name)
++    if raw in (None, ""):
++        return default
++    return clean_int(raw, name, lo=lo, hi=hi)
+diff --git a/backend/app/timeutil.py b/backend/app/timeutil.py
+new file mode 100644
+index 0000000..920b25f
+--- /dev/null
++++ b/backend/app/timeutil.py
+@@ -0,0 +1,22 @@
++"""Quy ước thời gian của CINEVO (một nơi duy nhất, tránh lẫn lộn múi giờ).
++
++- Mọi mốc hệ thống (created_at, paid_at, hạn OTP, log) lưu theo UTC, KHÔNG gắn tzinfo  -> utc_now().
++- Giờ chiếu (Showtime.start_time) là giờ treo tường tại rạp ở Việt Nam (UTC+7, không có giờ mùa hè)
++  -> so sánh bằng local_now(). Nhờ đó server đặt ở múi giờ nào cũng cho kết quả đúng.
++"""
++from datetime import datetime, timedelta, timezone
++
++VN_TZ = timezone(timedelta(hours=7))
++
++
++def utc_now() -> datetime:
++    return datetime.now(timezone.utc).replace(tzinfo=None)
++
++
++def local_now() -> datetime:
++    return datetime.now(VN_TZ).replace(tzinfo=None)
++
++
++def iso_utc(dt: datetime | None) -> str | None:
++    """Chuỗi ISO có hậu tố Z để trình duyệt hiểu đúng là UTC."""
++    return dt.isoformat() + "Z" if dt else None
+diff --git a/backend/database/seed.py b/backend/database/seed.py
+index 2ba1656..ca43777 100644
+--- a/backend/database/seed.py
++++ b/backend/database/seed.py
+@@ -4,12 +4,13 @@ Chạy tay:   python database/seed.py --reset     (xóa sạch và tạo lại)
+ run.py tự động gọi seed_demo() khi database còn trống.
+ """
+ import sys
+-from datetime import date, datetime, time, timedelta
++from datetime import datetime, time, timedelta
+ from pathlib import Path
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # cho phép chạy trực tiếp file này
+ 
+ from app import create_app                      # noqa: E402
++from app.timeutil import local_now             # noqa: E402
+ from app.extensions import db                   # noqa: E402
+ from app.models import (Cinema, Food, Movie, Promotion, Role, Room, Seat, Showtime, User,   # noqa: E402
+                         ROLE_ADMIN, ROLE_MANAGER, ROLE_USER, SEAT_STANDARD, SEAT_VIP, STATUS_ACTIVE)
+@@ -65,7 +66,7 @@ def seed_demo():
+     for title, genre, mins, age, rating, director, status, color, desc in MOVIES:
+         m = Movie(title=title, genre=genre, duration_minutes=mins, age_rating=age, rating=rating,
+                   director=director, status=status, poster_color=color, description=desc,
+-                  release_date=date.today() + timedelta(days=-14 if status == "now_showing" else 30))
++                  release_date=local_now().date() + timedelta(days=-14 if status == "now_showing" else 30))
+         movies.append(m)
+     db.session.add_all(movies)
+ 
+@@ -92,7 +93,7 @@ def seed_demo():
+             for s, slot in enumerate(SLOTS):
+                 movie = showing[(idx + s + day) % len(showing)]
+                 db.session.add(Showtime(movie_id=movie.id, room_id=room.id, base_price=90000,
+-                                        start_time=datetime.combine(date.today() + timedelta(days=day), slot)))
++                                        start_time=datetime.combine(local_now().date() + timedelta(days=day), slot)))
+ 
+     db.session.add_all([Food(name=n, description=d, price=p, is_combo=c) for n, d, p, c in FOODS])
+     db.session.add_all([Promotion(code="CINEVO10", description="Giảm 10% cho khách mới", discount_percent=10),
+diff --git a/backend/pytest.ini b/backend/pytest.ini
+new file mode 100644
+index 0000000..505a8a0
+--- /dev/null
++++ b/backend/pytest.ini
+@@ -0,0 +1,4 @@
++[pytest]
++testpaths = tests
++filterwarnings =
++    ignore::DeprecationWarning
+diff --git a/backend/requirements-dev.txt b/backend/requirements-dev.txt
+new file mode 100644
+index 0000000..60e163f
+--- /dev/null
++++ b/backend/requirements-dev.txt
+@@ -0,0 +1,2 @@
++-r requirements.txt
++pytest==8.3.3
+diff --git a/backend/run.py b/backend/run.py
+index a7af6d6..1ff7b5d 100644
+--- a/backend/run.py
++++ b/backend/run.py
+@@ -1,7 +1,9 @@
+-"""Điểm chạy backend:  python run.py   (mặc định http://localhost:5000)"""
+-import os
++"""Điểm chạy backend:  python run.py   (mặc định http://127.0.0.1:5000)
+ 
++HOST/PORT/FLASK_DEBUG/APP_ENV đọc từ .env. Debug tự tắt nếu HOST không phải localhost hoặc APP_ENV=production.
++"""
+ from app import create_app
++from app.config import get_run_settings
+ from app.extensions import db
+ from database.seed import is_empty, seed_demo
+ 
+@@ -14,4 +16,5 @@ with app.app_context():
+         print(">> Đã tạo database SQLite và dữ liệu demo.")
+ 
+ if __name__ == "__main__":
+-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
++    host, port, debug = get_run_settings()
++    app.run(host=host, port=port, debug=debug)
+diff --git a/backend/tests/__init__.py b/backend/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/backend/tests/conftest.py b/backend/tests/conftest.py
+new file mode 100644
+index 0000000..8dd0990
+--- /dev/null
++++ b/backend/tests/conftest.py
+@@ -0,0 +1,71 @@
++"""Fixture dùng chung. Mỗi test có một database SQLite riêng (file tạm) đã nạp dữ liệu demo."""
++import os
++import sys
++from pathlib import Path
++
++import pytest
++
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++os.environ.setdefault("APP_ENV", "development")
++
++from app import create_app                    # noqa: E402
++from app.config import Config                 # noqa: E402
++from app.extensions import db                 # noqa: E402
++from app.services import rate_limit           # noqa: E402
++from database.seed import seed_demo           # noqa: E402
++
++ACCOUNTS = {"user": ("user@cinevo.vn", "User@123"),
++            "manager": ("manager@cinevo.vn", "Manager@123"),
++            "admin": ("admin@cinevo.vn", "Admin@123")}
++
++
++def make_app(tmp_path, **overrides):
++    attrs = {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{(tmp_path / 'test.db').as_posix()}",
++             "RATELIMIT_ENABLED": False, "TESTING": True, **overrides}
++    app = create_app(type("TestConfig", (Config,), attrs))
++    with app.app_context():
++        db.create_all()
++        seed_demo()
++    rate_limit.reset()
++    return app
++
++
++@pytest.fixture
++def app(tmp_path):
++    return make_app(tmp_path)
++
++
++@pytest.fixture
++def client(app):
++    return app.test_client()
++
++
++@pytest.fixture
++def tokens(client):
++    out = {}
++    for role, (email, pw) in ACCOUNTS.items():
++        out[role] = client.post("/api/auth/login", json={"email": email, "password": pw}).get_json()["token"]
++    return out
++
++
++@pytest.fixture
++def auth(tokens):
++    """auth('user') -> header Authorization. auth(None) -> không có header."""
++    return lambda role: {"Authorization": f"Bearer {tokens[role]}"} if role else {}
++
++
++REGISTER = {"full_name": "Pham Dat", "email": "dat@gmail.com", "phone": "0912345678",
++            "password": "abc123", "confirm_password": "abc123", "accept_terms": True}
++
++
++@pytest.fixture
++def register_payload():
++    return dict(REGISTER)
++
++
++@pytest.fixture
++def seat_info(client):
++    """Một suất chiếu tương lai + danh sách ghế của nó."""
++    sid = client.get("/api/showtimes?movie_id=1").get_json()[0]["id"]
++    seats = client.get(f"/api/showtimes/{sid}/seats").get_json()["seats"]
++    return sid, seats
+diff --git a/backend/tests/test_auth.py b/backend/tests/test_auth.py
+new file mode 100644
+index 0000000..bc39336
+--- /dev/null
++++ b/backend/tests/test_auth.py
+@@ -0,0 +1,51 @@
++"""Tài khoản: đăng ký, OTP, đăng nhập, chống nâng quyền, validate."""
++from tests.conftest import ACCOUNTS
++
++
++def test_register_always_creates_user_role_even_if_client_sends_role(client, register_payload):
++    r = client.post("/api/auth/register", json={**register_payload, "role": "ADMIN", "role_id": 3, "status": "ACTIVE"})
++    assert r.status_code == 201
++    code = r.get_json()["otp_hint"]
++    v = client.post("/api/auth/verify-otp", json={"email": register_payload["email"], "code": code}).get_json()
++    assert v["user"]["role"] == "USER" and v["user"]["status"] == "ACTIVE"
++
++
++def test_pending_account_cannot_login_until_verified(client, register_payload):
++    client.post("/api/auth/register", json=register_payload)
++    r = client.post("/api/auth/login", json={"email": register_payload["email"], "password": "abc123"})
++    assert r.status_code == 403 and r.get_json()["code"] == "NOT_VERIFIED"
++
++
++def test_duplicate_email_rejected(client, register_payload):
++    r = client.post("/api/auth/register", json={**register_payload, "email": ACCOUNTS["user"][0]})
++    assert r.status_code == 409 and r.get_json()["code"] == "EMAIL_EXISTS"
++
++
++def test_wrong_password_and_unknown_user_give_same_error(client):
++    a = client.post("/api/auth/login", json={"email": "user@cinevo.vn", "password": "sai"})
++    b = client.post("/api/auth/login", json={"email": "khong@co.vn", "password": "sai"})
++    assert a.status_code == b.status_code == 401 and a.get_json() == b.get_json()
++
++
++def test_wrong_otp_rejected(client, register_payload):
++    client.post("/api/auth/register", json=register_payload)
++    r = client.post("/api/auth/verify-otp", json={"email": register_payload["email"], "code": "000000"})
++    assert r.status_code == 400
++
++
++def test_user_cannot_change_own_role_via_profile(client, auth):
++    r = client.put("/api/auth/me", json={"role": "ADMIN", "full_name": "Zed"}, headers=auth("user"))
++    assert r.get_json()["user"]["role"] == "USER"
++
++
++def test_password_is_hashed(app):
++    from app.models import User
++    with app.app_context():
++        u = User.query.filter_by(email="user@cinevo.vn").one()
++        assert u.password_hash != "User@123" and u.password_hash.startswith(("scrypt:", "pbkdf2:"))
++
++
++def test_locked_user_token_stops_working(client, auth):
++    uid = client.get("/api/auth/me", headers=auth("user")).get_json()["user"]["id"]
++    assert client.patch(f"/api/admin/users/{uid}/status", json={"status": "LOCKED"}, headers=auth("admin")).status_code == 200
++    assert client.get("/api/auth/me", headers=auth("user")).status_code == 401
+diff --git a/backend/tests/test_booking.py b/backend/tests/test_booking.py
+new file mode 100644
+index 0000000..7745d8b
+--- /dev/null
++++ b/backend/tests/test_booking.py
+@@ -0,0 +1,112 @@
++"""Đặt vé: giá do server tính, chống đặt trùng ghế, quyền xem vé."""
++import threading
++from datetime import timedelta
++
++from app.extensions import db
++from app.models import Showtime
++from app.timeutil import local_now
++
++
++def book(client, headers, sid, seat_ids, foods=None, **extra):
++    return client.post("/api/bookings", headers=headers,
++                       json={"showtime_id": sid, "seat_ids": seat_ids, "foods": foods or [],
++                             "payment_method": "QR", **extra})
++
++
++def test_price_is_computed_by_server_and_client_price_ignored(client, auth, seat_info):
++    sid, seats = seat_info
++    standard = next(s for s in seats if s["type"] == "STANDARD")
++    r = book(client, auth("user"), sid, [standard["id"]], [{"food_id": 2, "quantity": 1}],
++             amount=1, total_amount=1, price=1)
++    assert r.status_code == 201
++    assert r.get_json()["total_amount"] == 90000 + 99000
++
++
++def test_vip_surcharge(client, auth, seat_info):
++    sid, seats = seat_info
++    vip = next(s for s in seats if s["type"] == "VIP")
++    assert book(client, auth("user"), sid, [vip["id"]]).get_json()["seat_amount"] == 110000
++
++
++def test_booking_requires_login(client, seat_info):
++    sid, seats = seat_info
++    assert book(client, {}, sid, [seats[0]["id"]]).status_code == 401
++
++
++def test_same_seat_cannot_be_booked_twice(client, auth, seat_info):
++    sid, seats = seat_info
++    assert book(client, auth("user"), sid, [seats[0]["id"]]).status_code == 201
++    r = book(client, auth("manager"), sid, [seats[0]["id"]])
++    assert r.status_code == 409 and r.get_json()["code"] == "SEAT_TAKEN"
++
++
++def test_partial_overlap_rejects_whole_booking(client, auth, seat_info):
++    sid, seats = seat_info
++    book(client, auth("user"), sid, [seats[0]["id"]])
++    assert book(client, auth("manager"), sid, [seats[0]["id"], seats[1]["id"]]).status_code == 409
++    free = client.get(f"/api/showtimes/{sid}/seats").get_json()["seats"]
++    assert next(s for s in free if s["id"] == seats[1]["id"])["booked"] is False   # ghế 2 không bị giữ nhầm
++
++
++def test_seat_race_only_one_booking_succeeds(app, tokens, seat_info):
++    """12 request đồng thời cùng một ghế -> đúng 1 vé hợp lệ."""
++    sid, seats = seat_info
++    results = []
++
++    def go():
++        c = app.test_client()
++        results.append(book(c, {"Authorization": f"Bearer {tokens['user']}"}, sid, [seats[5]["id"]]).status_code)
++
++    threads = [threading.Thread(target=go) for _ in range(12)]
++    [t.start() for t in threads]
++    [t.join() for t in threads]
++    assert results.count(201) == 1 and results.count(409) == 11, results
++
++
++def test_invalid_inputs_rejected(client, auth, seat_info):
++    sid, seats = seat_info
++    h, s = auth("user"), seats[0]["id"]
++    assert book(client, h, sid, [s], [{"food_id": 1, "quantity": -5}]).status_code == 400
++    assert book(client, h, sid, [s], [{"food_id": 1, "quantity": 999}]).status_code == 400
++    assert book(client, h, sid, [s], ["khong-phai-dict"]).status_code == 400
++    assert book(client, h, sid, [s, s]).status_code == 400            # ghế lặp
++    assert book(client, h, sid, []).status_code == 400
++    assert book(client, h, sid, list(range(1, 12))).status_code == 400  # quá 8 ghế
++    assert book(client, h, 999999, [s]).status_code == 404
++    assert client.post("/api/bookings", headers=h, json={"showtime_id": sid, "seat_ids": [s],
++                       "payment_method": "BITCOIN"}).status_code == 400
++
++
++def test_seat_from_other_room_rejected(client, auth, seat_info):
++    sid, seats = seat_info
++    other_sid = next(s["id"] for s in client.get("/api/showtimes?city=TP.HCM").get_json())
++    other_seats = client.get(f"/api/showtimes/{other_sid}/seats").get_json()["seats"]
++    assert book(client, auth("user"), sid, [other_seats[0]["id"]]).status_code == 400
++
++
++def test_cannot_book_started_showtime(app, client, auth, seat_info):
++    sid, seats = seat_info
++    with app.app_context():
++        db.session.get(Showtime, sid).start_time = local_now() - timedelta(minutes=1)
++        db.session.commit()
++    assert book(client, auth("user"), sid, [seats[0]["id"]]).status_code == 400
++
++
++def test_booking_visible_only_to_owner_or_staff(client, auth, register_payload, seat_info):
++    sid, seats = seat_info
++    code = book(client, auth("user"), sid, [seats[0]["id"]]).get_json()["code"]
++    assert client.get(f"/api/bookings/{code}", headers=auth("user")).status_code == 200
++    assert client.get(f"/api/bookings/{code}", headers=auth("manager")).status_code == 200
++    assert client.get(f"/api/bookings/{code}").status_code == 401
++    # một USER khác không được xem
++    client.post("/api/auth/register", json=register_payload)
++    tok = client.post("/api/auth/verify-otp", json={"email": register_payload["email"], "code": "123456"}).get_json()["token"]
++    assert client.get(f"/api/bookings/{code}", headers={"Authorization": f"Bearer {tok}"}).status_code == 404
++    assert client.get("/api/bookings/my", headers={"Authorization": f"Bearer {tok}"}).get_json() == []
++
++
++def test_payment_recorded_and_code_format(client, auth, seat_info):
++    sid, seats = seat_info
++    b = book(client, auth("user"), sid, [seats[0]["id"]]).get_json()
++    assert b["code"].startswith("CV") and len(b["code"]) == 10
++    assert b["payment"]["status"] == "PAID" and b["payment"]["amount"] == b["total_amount"]
+diff --git a/backend/tests/test_rbac.py b/backend/tests/test_rbac.py
+new file mode 100644
+index 0000000..0e09010
+--- /dev/null
++++ b/backend/tests/test_rbac.py
+@@ -0,0 +1,48 @@
++"""Phân quyền backend: không tin frontend."""
++import jwt
++import pytest
++
++ENDPOINTS = [  # (url, anon, user, manager, admin)
++    ("/api/admin/users", 401, 403, 403, 200),
++    ("/api/admin/dashboard", 401, 403, 403, 200),
++    ("/api/admin/transactions", 401, 403, 403, 200),
++    ("/api/manager/dashboard", 401, 403, 200, 200),
++    ("/api/manager/bookings", 401, 403, 200, 200),
++    ("/api/bookings/my", 401, 200, 200, 200),
++]
++
++
++@pytest.mark.parametrize("url,anon,user,manager,admin", ENDPOINTS)
++def test_role_matrix(client, auth, url, anon, user, manager, admin):
++    for role, expected in ((None, anon), ("user", user), ("manager", manager), ("admin", admin)):
++        assert client.get(url, headers=auth(role)).status_code == expected, (url, role)
++
++
++def test_manager_cannot_create_manager_or_lock_users(client, auth):
++    assert client.post("/api/admin/managers", json={}, headers=auth("manager")).status_code == 403
++    assert client.patch("/api/admin/users/1/status", json={"status": "LOCKED"}, headers=auth("manager")).status_code == 403
++
++
++def test_forged_tokens_rejected(client, app):
++    forged = [jwt.encode({"sub": "3", "role": "ADMIN"}, key="", algorithm="none"),
++              jwt.encode({"sub": "3", "role": "ADMIN"}, "sai-khoa", algorithm="HS256"),
++              jwt.encode({"sub": "3", "role": "ADMIN"}, "dev-secret-change-me", algorithm="HS256"),  # khóa mặc định cũ
++              "abc.def.ghi", ""]
++    for t in forged:
++        assert client.get("/api/admin/users", headers={"Authorization": f"Bearer {t}"}).status_code == 401
++
++
++def test_role_in_token_is_not_trusted_over_database(client, app, auth):
++    """Token USER bị sửa role thành ADMIN (ký đúng khóa) vẫn không có quyền vì backend đọc role từ DB."""
++    token = jwt.encode({"sub": "1", "role": "ADMIN"}, app.config["SECRET_KEY"], algorithm="HS256")
++    assert client.get("/api/admin/users", headers={"Authorization": f"Bearer {token}"}).status_code == 403
++
++
++def test_expired_token_rejected(client, app):
++    token = jwt.encode({"sub": "3", "role": "ADMIN", "exp": 1}, app.config["SECRET_KEY"], algorithm="HS256")
++    assert client.get("/api/admin/users", headers={"Authorization": f"Bearer {token}"}).status_code == 401
++
++
++def test_admin_cannot_lock_self(client, auth):
++    me = client.get("/api/auth/me", headers=auth("admin")).get_json()["user"]["id"]
++    assert client.patch(f"/api/admin/users/{me}/status", json={"status": "LOCKED"}, headers=auth("admin")).status_code == 400
+diff --git a/backend/tests/test_security.py b/backend/tests/test_security.py
+new file mode 100644
+index 0000000..6d691f4
+--- /dev/null
++++ b/backend/tests/test_security.py
+@@ -0,0 +1,73 @@
++"""Cấu hình an toàn: secret, debug, OTP, rate limit, header."""
++import pytest
++
++from app.config import get_run_settings, resolve_secret_key
++from tests.conftest import make_app
++
++
++def test_production_rejects_missing_or_weak_secret(tmp_path):
++    for bad in (None, "", "dev-secret-change-me", "ngan"):
++        with pytest.raises(RuntimeError):
++            resolve_secret_key(bad, True, tmp_path / "k")
++    assert resolve_secret_key("a" * 40, True, tmp_path / "k") == "a" * 40
++
++
++def test_dev_generates_random_persistent_secret_not_the_known_default(tmp_path):
++    f = tmp_path / "k"
++    k1 = resolve_secret_key("dev-secret-change-me", False, f)
++    assert k1 != "dev-secret-change-me" and len(k1) >= 32
++    assert resolve_secret_key(None, False, f) == k1      # dùng lại, không đổi mỗi lần chạy
++
++
++def test_debug_only_on_localhost_and_never_in_production():
++    assert get_run_settings({"HOST": "127.0.0.1"})[2] is True
++    assert get_run_settings({"HOST": "0.0.0.0"})[2] is False
++    assert get_run_settings({"HOST": "127.0.0.1", "FLASK_DEBUG": "false"})[2] is False
++
++
++def test_otp_hint_hidden_when_disabled(tmp_path, register_payload):
++    c = make_app(tmp_path, OTP_DEBUG_HINT=False).test_client()
++    assert "otp_hint" not in c.post("/api/auth/register", json=register_payload).get_json()
++
++
++def test_production_otp_is_random_not_fixed(tmp_path, register_payload):
++    app = make_app(tmp_path, MOCK_OTP_CODE="", OTP_DEBUG_HINT=True)
++    codes = set()
++    for i in range(3):
++        codes.add(app.test_client().post("/api/auth/register",
++                  json={**register_payload, "email": f"u{i}@x.com"}).get_json()["otp_hint"])
++    assert "123456" not in codes and len(codes) == 3
++
++
++def test_login_rate_limited(tmp_path):
++    c = make_app(tmp_path, RATELIMIT_ENABLED=True).test_client()
++    codes = [c.post("/api/auth/login", json={"email": "user@cinevo.vn", "password": f"sai{i}"}).status_code for i in range(12)]
++    assert codes[:10] == [401] * 10 and codes[10] == 429
++    r = c.post("/api/auth/login", json={"email": "user@cinevo.vn", "password": "User@123"})
++    assert r.status_code == 429 and "Retry-After" in r.headers          # đúng mật khẩu cũng bị chặn khi đã vượt giới hạn
++
++
++def test_otp_brute_force_blocked(tmp_path, register_payload):
++    c = make_app(tmp_path, RATELIMIT_ENABLED=True, MOCK_OTP_CODE="123456").test_client()
++    c.post("/api/auth/register", json=register_payload)
++    codes = [c.post("/api/auth/verify-otp", json={"email": register_payload["email"], "code": f"{i:06d}"}).status_code
++             for i in range(7)]
++    assert codes[:5] == [400] * 5 and codes[5:] == [429, 429]
++    # sau khi bị khóa, ngay cả mã ĐÚNG cũng không dùng được
++    assert c.post("/api/auth/verify-otp", json={"email": register_payload["email"], "code": "123456"}).status_code == 429
++
++
++def test_security_headers_and_cors(client):
++    r = client.get("/api/health")
++    assert r.headers["X-Content-Type-Options"] == "nosniff" and r.headers["X-Frame-Options"] == "DENY"
++    evil = client.options("/api/movies", headers={"Origin": "http://evil.com", "Access-Control-Request-Method": "GET"})
++    assert evil.headers.get("Access-Control-Allow-Origin") is None
++
++
++def test_request_body_size_limited(client):
++    r = client.post("/api/auth/login", data="x" * (2 * 1024 * 1024), content_type="application/json")
++    assert r.status_code == 413
++
++
++def test_times_are_utc_marked(client, auth):
++    assert client.get("/api/auth/me", headers=auth("user")).get_json()["user"]["created_at"].endswith("Z")
+diff --git a/backend/tests/test_validation.py b/backend/tests/test_validation.py
+new file mode 100644
+index 0000000..a5802e8
+--- /dev/null
++++ b/backend/tests/test_validation.py
+@@ -0,0 +1,41 @@
++"""Dữ liệu sai, quá dài, sai kiểu phải trả 4xx (không bao giờ 500)."""
++import pytest
++
++
++def test_bad_json_returns_400(client):
++    r = client.post("/api/auth/login", data="{khong-phai-json", content_type="application/json")
++    assert r.status_code == 400 and r.get_json()["code"] == "BAD_JSON"
++
++
++def test_json_array_instead_of_object_returns_400(client):
++    assert client.post("/api/auth/login", json=[1, 2]).status_code == 400
++
++
++@pytest.mark.parametrize("field,value", [("full_name", "A" * 5000), ("email", "x" * 500 + "@a.com"),
++                                           ("phone", "abc"), ("password", "p" * 1000)])
++def test_register_rejects_oversized_or_invalid_fields(client, register_payload, field, value):
++    payload = {**register_payload, field: value, "confirm_password": value if field == "password" else "abc123"}
++    assert client.post("/api/auth/register", json=payload).status_code == 400
++
++
++def test_terms_must_be_accepted(client, register_payload):
++    assert client.post("/api/auth/register", json={**register_payload, "accept_terms": False}).status_code == 400
++
++
++def test_manager_movie_validation(client, auth):
++    h = auth("manager")
++    assert client.post("/api/manager/movies", json={"title": "T", "status": "hacked"}, headers=h).status_code == 400
++    assert client.post("/api/manager/movies", json={"title": "T" * 500}, headers=h).status_code == 400
++    assert client.post("/api/manager/movies", json={"title": "T", "duration_minutes": -5}, headers=h).status_code == 400
++    assert client.post("/api/manager/movies", json={"title": "Phim mới", "status": "coming_soon"}, headers=h).status_code == 201
++
++
++@pytest.mark.parametrize("url", ["/api/showtimes?movie_id=abc", "/api/showtimes?date=khong-phai-ngay",
++                                  "/api/ai/recommend-seats?showtime_id=x", "/api/ai/recommend-movies?limit=-1"])
++def test_bad_query_params_return_400_not_500(client, url):
++    assert client.get(url).status_code == 400
++
++
++def test_chat_message_length_limited(client):
++    assert client.post("/api/ai/chat", json={"message": "x" * 600}).status_code == 400
++    assert client.post("/api/ai/chat", json={"message": "đặt vé thế nào"}).status_code == 200
+diff --git a/frontend/src/components/AuthPanel.jsx b/frontend/src/components/AuthPanel.jsx
+index be33ab0..8d9c1b9 100644
+--- a/frontend/src/components/AuthPanel.jsx
++++ b/frontend/src/components/AuthPanel.jsx
+@@ -28,7 +28,7 @@ export default function AuthPanel({ initialView = "login", onSuccess }) {
+     run(async () => {
+       try { onSuccess?.(await login(loginForm.email, loginForm.password)); }
+       catch (err) {
+-        if (err.code === "NOT_VERIFIED") { setOtp((o) => ({ ...o, email: loginForm.email, masked: loginForm.email, hint: "123456" })); go("otp"); }
++        if (err.code === "NOT_VERIFIED") { setOtp({ email: loginForm.email, masked: loginForm.email, hint: err.data?.otp_hint || "", digits: Array(6).fill("") }); go("otp"); }
+         else throw err;
+       }
+     });
+diff --git a/frontend/src/pages/admin/ActivityLog.jsx b/frontend/src/pages/admin/ActivityLog.jsx
+index ee687a7..7996d3e 100644
+--- a/frontend/src/pages/admin/ActivityLog.jsx
++++ b/frontend/src/pages/admin/ActivityLog.jsx
+@@ -1,6 +1,6 @@
+ import ResourcePage from "../../components/ResourcePage";
+ 
+-const columns = [{ key: "id", label: "ID" }, { key: "user", label: "Người dùng" }, { key: "action", label: "Hành động" }, { key: "detail", label: "Chi tiết" }, { key: "created_at", label: "Thời gian", render: (r) => new Date(r.created_at + "Z").toLocaleString("vi-VN") }];
++const columns = [{ key: "id", label: "ID" }, { key: "user", label: "Người dùng" }, { key: "action", label: "Hành động" }, { key: "detail", label: "Chi tiết" }, { key: "created_at", label: "Thời gian", render: (r) => new Date(r.created_at).toLocaleString("vi-VN") }];
+ 
+ export default function ActivityLog() {
+   return <ResourcePage title="Nhật ký hoạt động" endpoint="/admin/activity-logs" columns={columns} />;
