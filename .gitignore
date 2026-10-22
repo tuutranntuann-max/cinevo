@@ -1,0 +1,19 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+# Database & môi trường
+*.db
+*.sqlite3
+.env
+# Node
+node_modules/
+dist/
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Khóa bí mật sinh tự động khi phát triển
+.dev_secret_key
