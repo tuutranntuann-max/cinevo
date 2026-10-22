@@ -73,65 +73,94 @@ VIP_ROWS = "FG"
 
 
 def is_empty() -> bool:
-    return Role.query.first() is None
+    return Movie.query.first() is None and Cinema.query.first() is None
 
 
 def seed_demo():
-    roles = {n: Role(name=n, description=d) for n, d in
-             [(ROLE_USER, "Khách hàng"), (ROLE_EMPLOYEE, "Nhân viên rạp"),
-              (ROLE_MANAGER, "Quản lý rạp"), (ROLE_ADMIN, "Quản trị hệ thống")]}
-    db.session.add_all(roles.values())
+    roles = {role.name: role for role in Role.query.all()}
+    for name, description in (
+        (ROLE_USER, "Khách hàng"),
+        (ROLE_EMPLOYEE, "Nhân viên rạp"),
+        (ROLE_MANAGER, "Quản lý rạp"),
+        (ROLE_ADMIN, "Quản trị hệ thống"),
+    ):
+        if name not in roles:
+            roles[name] = Role(name=name, description=description)
+            db.session.add(roles[name])
+    db.session.flush()
 
     for name, email, phone, pw, role in demo_accounts():
+        if User.query.filter_by(email=email).first():
+            continue
         u = User(full_name=name, email=email, phone=phone, role=roles[role], status=STATUS_ACTIVE)
         u.set_password(pw)
         db.session.add(u)
 
     movies = []
     for title, genre, mins, age, rating, director, status, color, desc in MOVIES:
-        m = Movie(title=title, genre=genre, duration_minutes=mins, age_rating=age, rating=rating,
-                  director=director, status=status, poster_color=color, description=desc,
-                  release_date=local_now().date() + timedelta(days=-14 if status == "now_showing" else 30))
+        m = Movie.query.filter_by(title=title).first()
+        if not m:
+            m = Movie(title=title, genre=genre, duration_minutes=mins, age_rating=age, rating=rating,
+                      director=director, status=status, poster_color=color, description=desc,
+                      release_date=local_now().date() + timedelta(days=-14 if status == "now_showing" else 30))
+            db.session.add(m)
         movies.append(m)
-    db.session.add_all(movies)
+    db.session.flush()
 
-    cinemas = [Cinema(name=n, city=c, address=a, phone=p) for n, c, a, p in CINEMAS]
-    db.session.add_all(cinemas)
+    cinemas = []
+    for name, city, address, phone in CINEMAS:
+        cinema = Cinema.query.filter_by(name=name).first()
+        if not cinema:
+            cinema = Cinema(name=name, city=city, address=address, phone=phone)
+            db.session.add(cinema)
+        cinemas.append(cinema)
     db.session.flush()
 
     rooms = []
     for ci, cinema in enumerate(cinemas):
         for r in range(2):
-            room = Room(cinema_id=cinema.id, name=f"Phòng {r + 1:02d}", room_type=["2D", "IMAX"][r],
-                        total_rows=len(ROWS), total_cols=COLS)
-            db.session.add(room)
+            room_name = f"Phòng {r + 1:02d}"
+            room = Room.query.filter_by(cinema_id=cinema.id, name=room_name).first()
+            if not room:
+                room = Room(cinema_id=cinema.id, name=room_name, room_type=["2D", "IMAX"][r],
+                            total_rows=len(ROWS), total_cols=COLS)
+                db.session.add(room)
             db.session.flush()
-            for row in ROWS:
-                for n in range(1, COLS + 1):
-                    db.session.add(Seat(room_id=room.id, row_label=row, number=n,
-                                        seat_type=SEAT_VIP if row in VIP_ROWS else SEAT_STANDARD))
+            if not Seat.query.filter_by(room_id=room.id).first():
+                for row in ROWS:
+                    for n in range(1, COLS + 1):
+                        db.session.add(Seat(room_id=room.id, row_label=row, number=n,
+                                            seat_type=SEAT_VIP if row in VIP_ROWS else SEAT_STANDARD))
             rooms.append((ci * 2 + r, room))
 
     showing = [m for m in movies if m.status == "now_showing"]
     for day in range(DAYS):
         for idx, room in rooms:
+            if Showtime.query.filter_by(room_id=room.id).first():
+                continue
             for s, slot in enumerate(SLOTS):
                 movie = showing[(idx + s + day) % len(showing)]
                 db.session.add(Showtime(movie_id=movie.id, room_id=room.id, base_price=90000,
                                         start_time=datetime.combine(local_now().date() + timedelta(days=day), slot)))
 
-    db.session.add_all([Food(name=n, description=d, price=p, is_combo=c) for n, d, p, c in FOODS])
-    db.session.add_all([
-        Product(name=name, category=category, description=description, price=price,
-                stock_quantity=quantity, active=True)
-        for name, category, description, price, quantity in SHOP_PRODUCTS
-    ])
-    db.session.add(CommerceSettings(
-        id=1,
-        values={"demo_inventory_seeded": True},
-    ))
-    db.session.add_all([Promotion(code="CINEVO10", description="Giảm 10% cho khách mới", discount_percent=10),
-                        Promotion(code="WEEKEND15", description="Giảm 15% suất cuối tuần", discount_percent=15)])
+    for name, description, price, is_combo in FOODS:
+        if not Food.query.filter_by(name=name).first():
+            db.session.add(Food(name=name, description=description, price=price, is_combo=is_combo))
+    for name, category, description, price, quantity in SHOP_PRODUCTS:
+        if not Product.query.filter_by(name=name).first():
+            db.session.add(Product(name=name, category=category, description=description, price=price,
+                                   stock_quantity=quantity, active=True))
+    settings = db.session.get(CommerceSettings, 1)
+    if settings:
+        settings.values = {**(settings.values or {}), "demo_inventory_seeded": True}
+    else:
+        db.session.add(CommerceSettings(id=1, values={"demo_inventory_seeded": True}))
+    for code, description, discount_percent in (
+        ("CINEVO10", "Giảm 10% cho khách mới", 10),
+        ("WEEKEND15", "Giảm 15% suất cuối tuần", 15),
+    ):
+        if not Promotion.query.filter_by(code=code).first():
+            db.session.add(Promotion(code=code, description=description, discount_percent=discount_percent))
     db.session.commit()
 
 
