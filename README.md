@@ -55,14 +55,26 @@ New-NetFirewallRule -DisplayName "Cinevo Dev LAN Vite 5173" -Direction Inbound -
 
 Để gỡ quy tắc sau khi dùng xong: `Remove-NetFirewallRule -DisplayName "Cinevo Dev LAN Vite 5173"`. Backend vẫn chỉ lắng nghe trên máy phát triển.
 
+### Triển khai demo miễn phí trên Render
+
+Repository có `render.yaml` để tạo frontend và backend từ nhánh `main`:
+
+1. Đăng nhập Render, chọn **New → Blueprint** và kết nối `tuutranntuann-max/cinevo`.
+2. Chọn nhánh `main`, xem trước hai dịch vụ `cinevo-web` và `cinevo-api`, rồi bấm **Apply**.
+3. Khi cả hai dịch vụ triển khai xong, mở URL `onrender.com` của dịch vụ `cinevo-web`.
+
+Render tự sinh `SECRET_KEY` riêng trong biến môi trường backend; không cần tải `.env` hoặc khóa bí mật lên GitHub. Nếu tên miền `cinevo-web.onrender.com` hoặc `cinevo-api.onrender.com` đã được dùng, đổi tên dịch vụ rồi cập nhật `CORS_ORIGINS` của backend và `VITE_API_URL` của frontend cho khớp.
+
+Đây chỉ là demo: backend Free có thể ngủ sau thời gian không hoạt động; SQLite và các tệp tải lên nằm trên filesystem tạm thời, có thể mất khi restart/redeploy. Database demo được tạo lại từ dữ liệu seed, vì vậy không dùng dữ liệu khách hàng thật hoặc để dịch vụ này xử lý giao dịch thật. Render cấp domain `onrender.com` miễn phí; domain riêng cần được sở hữu/cấu hình riêng.
+
 ## 4. Tài khoản test
 | Vai trò | Email | Mật khẩu | Vào trang |
 |---|---|---|---|
 | USER | user@cinevo.vn | User@123 | `/user` |
-| MANAGER | manager@cinevo.vn | Manager@123 | `/manager` |
-| ADMIN | admin@cinevo.vn | Admin@123 | `/admin` |
+| MANAGER | manager@cinevo.vn | Manager@123 (development only) | `/manager` |
+| ADMIN | admin@cinevo.vn | Admin@123 (development only) | `/admin` |
 
-Đăng nhập tại `/user/login`. Hệ thống tự chuyển ADMIN sang `/admin`, MANAGER sang `/manager`. Đăng nhập chỉ cần email và mật khẩu. Khi development chưa kết nối Gmail OAuth hoặc cấu hình SMTP, OTP đăng ký dùng mã demo **123456**.
+Đăng nhập tại `/user/login`. Hệ thống tự chuyển ADMIN sang `/admin`, MANAGER sang `/manager`. Đăng nhập chỉ cần email và mật khẩu. Khi development chưa kết nối Gmail OAuth hoặc cấu hình SMTP, OTP đăng ký dùng mã demo **123456**. Trên Render, mật khẩu MANAGER và ADMIN được sinh riêng qua `MANAGER_BOOTSTRAP_PASSWORD` và `ADMIN_BOOTSTRAP_PASSWORD`; xem các giá trị này trong Environment của API service. Không dùng mật khẩu development mặc định trên dịch vụ công khai.
 
 Nhân viên/quản lý đăng nhập tại **Cổng nhân viên** hoặc `/manager/login`. Tài khoản mới gửi hồ sơ tại `/staff/register` gồm họ tên, email, điện thoại, CCCD, địa chỉ, giới tính và nghề nghiệp/tình trạng. Admin duyệt tại **Admin → Hồ sơ nhân viên** và cấp mã mời một lần (hạn 7 ngày); người đăng ký cần mã để tạo mật khẩu và kích hoạt tài khoản. Nhân viên và quản lý có chung quyền quản lý rạp.
 
@@ -186,15 +198,6 @@ Bộ test (`backend/tests/`) gồm tài khoản, chống nâng quyền, ma trậ
 ## 12. Git và điểm khôi phục
 Dự án đã có Git. Tag `phase0-baseline` là bản trước khi gia cố. Quay lại: `git checkout phase0-baseline`.
 Trước mỗi thay đổi lớn hãy `git commit` và đặt tag mới.
-
-### Khôi phục phim dung lượng lớn
-Video dùng Git LFS; sau khi cài Git LFS và clone repository, chạy `git lfs pull`. Để ghép phim đã chia thành các phần LFS, chạy từ thư mục gốc dự án:
-
-```powershell
-python backend/scripts/restore_large_film.py
-```
-
-Lệnh tạo lại `backend/uploads/films/film_1_243e511cfeeb4f89a993870d642366ba.mp4` sau khi kiểm tra kích thước và SHA-256. Tệp phim đầy đủ được giữ cục bộ và không commit lại.
 
 ## 13. Giới hạn thanh toán
 - Việc xác nhận giao dịch là thao tác thủ công sau khi nhân viên kiểm tra biến động ngân hàng; chưa tích hợp webhook ngân hàng/cổng thanh toán, vì vậy trạng thái “đã thanh toán” không được xác minh tự động.

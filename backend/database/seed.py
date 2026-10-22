@@ -3,6 +3,7 @@
 Chạy tay:   python database/seed.py --reset     (xóa sạch và tạo lại)
 run.py tự động gọi seed_demo() khi database còn trống.
 """
+import os
 import sys
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -20,6 +21,23 @@ DEMO_ACCOUNTS = [
     ("Quản lý Demo", "manager@cinevo.vn", "0900000002", "Manager@123", ROLE_MANAGER),
     ("Admin Demo", "admin@cinevo.vn", "0900000003", "Admin@123", ROLE_ADMIN),
 ]
+
+
+def demo_accounts():
+    production = os.getenv("APP_ENV", "development").lower() == "production"
+    accounts = []
+    for name, email, phone, default_password, role in DEMO_ACCOUNTS:
+        password = default_password
+        if production and role in (ROLE_MANAGER, ROLE_ADMIN):
+            variable = f"{role}_BOOTSTRAP_PASSWORD"
+            password = os.getenv(variable, "")
+            if len(password) < 32:
+                raise RuntimeError(
+                    f"{variable} must be configured with at least 32 characters in production."
+                )
+        accounts.append((name, email, phone, password, role))
+    return accounts
+
 
 MOVIES = [  # title, genre, minutes, age, rating, director, status, color, description
     ("Avatar 3: Lửa và Tro Tàn", "Hành động, Khoa học viễn tưởng", 190, "T13", 8.7, "James Cameron", "now_showing", "#0f4c5c",
@@ -64,7 +82,7 @@ def seed_demo():
               (ROLE_MANAGER, "Quản lý rạp"), (ROLE_ADMIN, "Quản trị hệ thống")]}
     db.session.add_all(roles.values())
 
-    for name, email, phone, pw, role in DEMO_ACCOUNTS:
+    for name, email, phone, pw, role in demo_accounts():
         u = User(full_name=name, email=email, phone=phone, role=roles[role], status=STATUS_ACTIVE)
         u.set_password(pw)
         db.session.add(u)

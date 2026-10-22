@@ -3,7 +3,34 @@ from io import BytesIO
 import re
 import smtplib
 
+import pytest
+
 from tests.conftest import ACCOUNTS
+
+
+def test_production_demo_accounts_use_generated_privileged_passwords(monkeypatch):
+    from database.seed import demo_accounts
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("MANAGER_BOOTSTRAP_PASSWORD", "m" * 32)
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_PASSWORD", "a" * 32)
+
+    accounts = {role: password for _, _, _, password, role in demo_accounts()}
+
+    assert accounts["USER"] == "User@123"
+    assert accounts["MANAGER"] == "m" * 32
+    assert accounts["ADMIN"] == "a" * 32
+
+
+def test_production_demo_accounts_reject_missing_privileged_password(monkeypatch):
+    from database.seed import demo_accounts
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("MANAGER_BOOTSTRAP_PASSWORD", raising=False)
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_PASSWORD", "a" * 32)
+
+    with pytest.raises(RuntimeError, match="MANAGER_BOOTSTRAP_PASSWORD"):
+        demo_accounts()
 
 
 def test_register_always_creates_user_role_even_if_client_sends_role(client, register_payload):
