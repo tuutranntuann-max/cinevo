@@ -57,13 +57,15 @@ New-NetFirewallRule -DisplayName "Cinevo Dev LAN Vite 5173" -Direction Inbound -
 
 ### Triển khai demo miễn phí trên Render
 
-Repository có `render.yaml` để tạo frontend và backend từ nhánh `main`:
+Blueprint đọc cấu hình `render.yaml` từ nhánh `main`; hai dịch vụ lấy mã ứng dụng từ nhánh deploy `render-deploy`:
 
 1. Đăng nhập Render, chọn **New → Blueprint** và kết nối `tuutranntuann-max/cinevo`.
 2. Chọn nhánh `main`, xem trước hai dịch vụ `cinevo-web` và `cinevo-api`, rồi bấm **Apply**.
 3. Khi cả hai dịch vụ triển khai xong, mở URL `onrender.com` của dịch vụ `cinevo-web`.
 
 Render tự sinh `SECRET_KEY` riêng trong biến môi trường backend; không cần tải `.env` hoặc khóa bí mật lên GitHub. Nếu tên miền `cinevo-web.onrender.com` hoặc `cinevo-api.onrender.com` đã được dùng, đổi tên dịch vụ rồi cập nhật `CORS_ORIGINS` của backend và `VITE_API_URL` của frontend cho khớp.
+
+Nhánh `render-deploy` không chứa cache, thư mục cài đặt hoặc video Git LFS để tránh làm Render kẹt khi clone; nhánh `main` được giữ nguyên. Khi cập nhật code, đồng bộ các thay đổi cần deploy sang `render-deploy`.
 
 Đây chỉ là demo: backend Free có thể ngủ sau thời gian không hoạt động; SQLite và các tệp tải lên nằm trên filesystem tạm thời, có thể mất khi restart/redeploy. Database demo được tạo lại từ dữ liệu seed, vì vậy không dùng dữ liệu khách hàng thật hoặc để dịch vụ này xử lý giao dịch thật. Render cấp domain `onrender.com` miễn phí; domain riêng cần được sở hữu/cấu hình riêng.
 
