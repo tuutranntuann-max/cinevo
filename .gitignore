@@ -17,3 +17,6 @@ dist/
 
 # Khóa bí mật sinh tự động khi phát triển
 .dev_secret_key
+
+# Reconstructed locally from Git LFS parts; do not commit the full movie file.
+/backend/uploads/films/film_1_243e511cfeeb4f89a993870d642366ba.mp4

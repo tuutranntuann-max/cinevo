@@ -187,6 +187,15 @@ Bộ test (`backend/tests/`) gồm tài khoản, chống nâng quyền, ma trậ
 Dự án đã có Git. Tag `phase0-baseline` là bản trước khi gia cố. Quay lại: `git checkout phase0-baseline`.
 Trước mỗi thay đổi lớn hãy `git commit` và đặt tag mới.
 
+### Khôi phục phim dung lượng lớn
+Video dùng Git LFS; sau khi cài Git LFS và clone repository, chạy `git lfs pull`. Để ghép phim đã chia thành các phần LFS, chạy từ thư mục gốc dự án:
+
+```powershell
+python backend/scripts/restore_large_film.py
+```
+
+Lệnh tạo lại `backend/uploads/films/film_1_243e511cfeeb4f89a993870d642366ba.mp4` sau khi kiểm tra kích thước và SHA-256. Tệp phim đầy đủ được giữ cục bộ và không commit lại.
+
 ## 13. Giới hạn thanh toán
 - Việc xác nhận giao dịch là thao tác thủ công sau khi nhân viên kiểm tra biến động ngân hàng; chưa tích hợp webhook ngân hàng/cổng thanh toán, vì vậy trạng thái “đã thanh toán” không được xác minh tự động.
 - Không nhập hoặc lưu thông tin thẻ/tài khoản ngân hàng của khách. QR VietQR được tạo theo số tiền và nội dung giao dịch; khách cần kiểm tra người nhận, chuyển đúng số tiền và mã giao dịch. Mọi thanh toán vẫn cần nhân viên xác nhận.
