@@ -1,4 +1,0 @@
-{
-  "tests/test_admin_movie_lifecycle.py::test_now_showing_movie_without_future_showtimes_is_hidden_as_expired": true,
-  "tests/test_admin_movie_films.py::test_admin_can_add_and_replace_film_artwork_for_customer_watch_page": true
-}

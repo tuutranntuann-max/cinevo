@@ -199,6 +199,11 @@ Bộ test (`backend/tests/`) gồm tài khoản, chống nâng quyền, ma trậ
 Dự án đã có Git. Tag `phase0-baseline` là bản trước khi gia cố. Quay lại: `git checkout phase0-baseline`.
 Trước mỗi thay đổi lớn hãy `git commit` và đặt tag mới.
 
+### Triển khai demo trên Render
+Blueprint `cinevo-render-demo` lấy cấu hình từ `main` và mã chạy từ nhánh `render-deploy`. Nhánh deploy bỏ qua môi trường cài đặt, cache và video Git LFS để Render có thể clone/build nhanh; nhánh `main` và dữ liệu gốc không bị thay đổi. Sau khi cập nhật mã nguồn, đồng bộ thay đổi cần triển khai sang `render-deploy`.
+
+Demo Free dùng SQLite và lưu tệp trên filesystem tạm thời; dữ liệu có thể mất khi dịch vụ khởi động lại hoặc triển khai lại. Không dùng dịch vụ này với dữ liệu khách hàng thật hoặc giao dịch thật.
+
 ## 13. Giới hạn thanh toán
 - Việc xác nhận giao dịch là thao tác thủ công sau khi nhân viên kiểm tra biến động ngân hàng; chưa tích hợp webhook ngân hàng/cổng thanh toán, vì vậy trạng thái “đã thanh toán” không được xác minh tự động.
 - Không nhập hoặc lưu thông tin thẻ/tài khoản ngân hàng của khách. QR VietQR được tạo theo số tiền và nội dung giao dịch; khách cần kiểm tra người nhận, chuyển đúng số tiền và mã giao dịch. Mọi thanh toán vẫn cần nhân viên xác nhận.

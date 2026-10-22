@@ -2,6 +2,7 @@
 venv/
 .venv/
 __pycache__/
+.pytest_cache/
 *.pyc
 # Database & môi trường
 *.db
@@ -9,6 +10,7 @@ __pycache__/
 .env
 # Node
 node_modules/
+frontend/.tsupgrader/
 dist/
 # IDE / OS
 .vscode/
@@ -20,3 +22,6 @@ dist/
 
 # Reconstructed locally from Git LFS parts; do not commit the full movie file.
 /backend/uploads/films/film_1_243e511cfeeb4f89a993870d642366ba.mp4
+
+# Deployment branch omits large uploaded videos to avoid Git LFS downloads.
+/backend/uploads/**/*.mp4

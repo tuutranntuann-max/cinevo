@@ -8,7 +8,7 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: waitress-serve --listen=0.0.0.0:$PORT run:app
     healthCheckPath: /api/health
-    branch: main
+    branch: render-deploy
     envVars:
       - key: APP_ENV
         value: production
@@ -31,7 +31,7 @@ services:
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
-    branch: main
+    branch: render-deploy
     envVars:
       - key: VITE_API_URL
         value: https://cinevo-api.onrender.com/api
